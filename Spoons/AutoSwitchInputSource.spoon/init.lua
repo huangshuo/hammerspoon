@@ -9,7 +9,7 @@ obj.__index = obj
 -- 插件信息
 obj.name = "AutoSwitchInputSource"
 obj.version = "0.1"
-obj.author = "Huang Shuo <hs.chn@qq.com>"
+obj.author = "huangshuo <huangshuo.me@gmail.com>"
 obj.homepage = "https://github.com/huangshuo/hammerspoon"
 obj.license = "Apache License 2.0 - https://www.apache.org/licenses/LICENSE-2.0"
 
@@ -18,130 +18,101 @@ obj.license = "Apache License 2.0 - https://www.apache.org/licenses/LICENSE-2.0"
 --- AutoSwitchInputSource.default
 --- Variable
 --- 系统默认输入法
-obj.default = "ABC"
+obj.default = "Shuangpin - Simplified"
 
 --- AutoSwitchInputSource.mapping
 --- Variable
---- app的默认输入法(app的name/title/path/bundleID)
+--- app的默认输入法
+--- Notes: key = app的name/path/bundleID, value = 输入法layout/method/sourceID
 obj.mapping = {
-  {"iTerm2", "Shuangpin - Simplified"},
-  {"/Applications/Visual Studio Code.app", "Shuangpin - Simplified"},
-  {"org.hammerspoon.Hammerspoon", "Shuangpin - Simplified"},
+  -- name <--> layout
+  ['iTerm2'] = 'ABC',
+  -- path <--> layout
+  ['/Applications/Visual Studio Code.app'] = 'ABC',
+  -- name <--> method
+  ['Google Chrome'] = 'Shuangpin - Simplified',
+  -- bundleID <--> sourceID
+  ['org.hammerspoon.Hammerspoon'] = 'com.apple.keylayout.ABC',
 }
 
 --- AutoSwitchInputSource.logger
 --- Variable
 --- 内置日志对象，可通过设置默认日志级别获取日志信息(hs.logger)
-obj.logger = hs.logger.new("AutoSwitchInputSource", "debug")
+obj.logger = hs.logger.new(obj.name, "debug")
 
 --- 内部变量
 --- 监控应用的watcher对象(hs.application.watcher)
-local applicationWatcher = nil
+local appWatcher = nil
 
---- AutoSwitchInputSource:switchInputSourceForAppFlag(appFlag)
+--- switchInputSourceTo(inputFlag)
 --- Method
---- 为app切换指定的输入法
+--- 切换输入法
 ---
 --- Parameters:
---- * appFlag - app的name/path/bundleID(string), 为nil时切换obj.default设置的输入法
+--- * inputFlag - 目标输入法(method/layout), 为空时切换obj.default设置的输入法
 ---
 --- Returns:
---- * AutoSwitchInputSource对象
-function obj:switchInputSourceForAppFlag(appFlag)
-  local target = nil
-  -- 使用默认输入法
-  if appFlag == nil then
-    target = self.default
-  else
-    -- 获取app默认输入法
-    for index, appMapping in pairs(self.mapping)
-    do
-      if appMapping[1] == appFlag then 
-        target = appMapping[2]
-        break
-      end
-    end
-  end
+--- * None
+local function switchInputSourceTo(inputFlag)
+  inputFlag = inputFlag or obj.default
   -- 切换输入法
-  local current = hs.keycodes.currentSourceID()
-  if target ~= hs.keycodes.currentSourceID() and
-    target ~= hs.keycodes.currentMethod() and target ~= hs.keycodes.currentLayout()
+  if inputFlag ~= hs.keycodes.currentSourceID() and
+  inputFlag ~= hs.keycodes.currentMethod() and inputFlag ~= hs.keycodes.currentLayout()
   then
-    -- self.logger:d("需要切换输入法: appFlag="..appFlag.." current="..current.." target="..target)
-    self:switchInputSourceToInputFlag(target)
-  -- else
-  --   self.logger:d("不需要切换输入法: appFlag="..appFlag.." current="..current.." target="..target)
-  end
-  return self
-end
-
---- AutoSwitchInputSource:switchInputSourceToInputFlag(inputFlag)
---- Method
---- 切换指定的输入法
----
---- Parameters:
---- * inputFlag - 目标输入法(method/layout/sourceID), 不指定时切换默认输入法(string)
----
---- Returns:
---- * AutoSwitchInputSource对象
-function obj:switchInputSourceToInputFlag(inputFlag)
-  inputFlag = inputFlag or self.default
-  local switched = false
-  for index, flag in pairs(hs.keycodes.methods())
-  do
-    -- self.logger:d("flag in methods: "..flag)
-    if flag == inputFlag then
-      -- self.logger:d("found method: "..flag)
-      switched = hs.keycodes.setMethod(inputFlag)
-      -- if switched then
-      --   self.logger:d("切换成功, method = "..inputFlag)
-      -- end
-      break
+    if hs.fnutils.contains(hs.keycodes.methods(), inputFlag) then
+      hs.keycodes.setMethod(inputFlag)
+    elseif hs.fnutils.contains(hs.keycodes.layouts(), inputFlag) then
+      hs.keycodes.setLayout(inputFlag)
+    elseif not hs.keycodes.currentSourceID(inputFlag) then
+      obj.logger:w("inputSource "..inputFlag.." not enabled.")
     end
   end
-  if not switched then
-    for index, flag in pairs(hs.keycodes.layouts())
-    do
-      -- self.logger:d("flag in layouts: "..flag)
-      if flag == inputFlag then
-        -- self.logger:d("found layout: "..flag)
-        switched = hs.keycodes.setLayout(inputFlag)
-        -- if switched then
-        --   self.logger:d("切换成功, layout = "..inputFlag)
-        -- end
-        break
-      end
-    end
-  end
-  if not switched then
-    -- self.logger:d("no method or method found")
-    switched = hs.keycodes.currentSourceID(inputFlag)
-  end
-  if not switched then
-    self.logger:e("输入法切换失败, 请检查mapping")
-  end
-  return self
 end
 
---- findAppFlagInMapping(appFlag)
+--- findTargetInputSourceInMapping(appFlag)
 --- Method
---- 查找mapping中是否有目标appFlag
+--- 查找appFlag对应的输入法(layout/method)
 ---
 --- Parameters:
---- * appFlag - app的name/path/bundleID(string)
+--- * target - app的name/path/bundleID(string)
 ---
 --- Returns:
---- * 存在则返回appFlag, 不存在则返回nil
-local function findAppFlagInMapping(appFlag)
-  -- obj.logger:d("查找appFlag = "..appFlag)
-  for index, appMapping in pairs(obj.mapping)
+--- * 存在则返回对应的输入法(layout/method), 不存在则返回nil
+local function findTargetInputSourceInMapping(target)
+  for appFlag, inputFlag in pairs(obj.mapping)
     do
-      if appMapping[1] == appFlag then
-        -- obj.logger:d("appFlag = "..appFlag.." found.")
-        return appFlag
+      if target == appFlag then
+        -- obj.logger:d(appFlag..">>>")
+        return inputFlag
       end
     end
   return nil
+end
+
+--- autoSwitchInputSource(appName, eventType, app)
+--- Method
+--- appWatcher事件触发时执行的方法
+--- Parameters:
+--- * appName - 触发事件的app的名称
+--- * eventType - 触发事件类型(hs.application.watcher.activated/deactivated/launched/launching/hidden/unhidden/terminated)
+--- * app - app对象(hs.application)
+local function autoSwitchInputSource(appName, eventType, app)
+  if eventType == hs.application.watcher.activated then
+    local target = findTargetInputSourceInMapping(appName)
+    if target == nil then
+      target = findTargetInputSourceInMapping(app:path())
+      if target == nil then
+        target = findTargetInputSourceInMapping(app:bundleID())
+      end
+    end
+    if target then
+      -- obj.logger:d(appName..">>>"..target)
+      switchInputSourceTo(target)
+    else
+      -- obj.logger:d(appName..">>> default = "..obj.default)
+      switchInputSourceTo(obj.default)
+    end
+  end
 end
 
 --- AutoSwitchInputSource:start()
@@ -154,27 +125,9 @@ end
 --- Returns:
 --- * AutoSwitchInputSource对象
 function obj:start()
-  applicationWatcher = hs.application.watcher.new(
-    function(appName, eventType, app)
-      if (eventType == hs.application.watcher.activated) then
-        local appFlag = findAppFlagInMapping(appName)
-        if not appFlag then
-          -- obj.logger:d("name not found.")
-          appFlag = findAppFlagInMapping(app:path())
-        end
-        if not appFlag then
-          -- obj.logger:d("path not found.")
-          appFlag = findAppFlagInMapping(app:bundleID())
-        end
-        if not appFlag then
-          -- obj.logger:d(appName.."未设置mapping, 切换至使用默认输入法")
-          obj:switchInputSourceToInputFlag(obj.default)
-        else
-          obj:switchInputSourceForAppFlag(appFlag)
-        end
-      end
-    end)
-  applicationWatcher:start()
+  appWatcher = hs.application.watcher.new(autoSwitchInputSource)
+  appWatcher:start()
+  self.logger:i(obj.name.." started.")
   return self
 end
 
@@ -188,12 +141,11 @@ end
 --- Returns:
 --- * AutoSwitchInputSource对象
 function obj:stop()
-  if applicationWatcher == nil then
-    self.logger:d("AutoSwitchInputSource已停止")
-  else
-    applicationWatcher:stop()
-    applicationWatcher = nil
+  if appWatcher ~= nil then
+    appWatcher:stop()
+    self.logger:i(obj.name.." stopped.")
   end
+  return self
 end
 
 return obj
